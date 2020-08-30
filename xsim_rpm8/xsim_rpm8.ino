@@ -16,11 +16,40 @@
 #define RELEASE "REL  04A"
 
 #include <EEPROM.h> //Needed to access the eeprom read write functions
+#include <Joystick.h>
 #include <TM1638.h> //can be downloaded from https://github.com/rjbatista/tm1638-library
 #include <MatrizLed.h> // it's in arduino library manager.
+
+#define N_MARCHAS 7
+#define N_BOTONES ( N_MARCHAS +2)
+#define CAL_X_MIN       450
+#define CAL_X_MAX       700
+#define CAL_Y_MIN       300
+#define CAL_Y_MAX       800
+// G29 Gear Stick Pinout
+// A0 = X axis  -> Pin 4 on DB9
+// A1 = Y axis  -> Pin 8 on DB9
+// 16 = Reverse -> Pin 2 on DB9
+// +5V to pin 3, 7 on DB9
+// GND to pin 6 on DB9
+// 14 & 15 for extra gear shift switchs
+// 20 (A2) for Clutch 
+#define PIN_GSX A0
+#define PIN_GSY A1
+#define PIN_GSR 15
+#define PIN_E A2
+#define PIN_GS1 16
+#define PIN_GS2 14
+ 
+Joystick_ Joystick(JOYSTICK_DEFAULT_REPORT_ID, JOYSTICK_TYPE_GAMEPAD, N_BOTONES, 0, false, false, false,  false, false, false,  false, false,  true, false, false);
 TM1638 module(8, 7, 9);
 MatrizLed matrix;
 
+// Data for gear stick
+int marcha=0;                        
+int embrague=0;
+
+// Data for Display
 unsigned int rpm;                  //holds the rpm data (0-65535 size)
 unsigned int carspeed;             //holds the speed data (0-65535 size)
 unsigned int fuel;
@@ -33,6 +62,7 @@ boolean speeddata = false;
 boolean geardata = false;
 boolean fueldata = false;               
 boolean hay = false;
+boolean idle = false;
 
 word ledcfg[]={
        ( 0b00000000 | 0b00000000 <<8),
@@ -176,7 +206,21 @@ void readkeys(){
 
 void setup() {
   int i;
+  // Configure normal pins
+  pinMode(PIN_GSX, INPUT_PULLUP);   
+  pinMode(PIN_GSY, INPUT_PULLUP);   
+  pinMode(PIN_GSR, INPUT);          
+  
+  pinMode(PIN_E, INPUT_PULLUP);  
+  pinMode(PIN_GS1, INPUT_PULLUP);
+  pinMode(PIN_GS2, INPUT_PULLUP);
+
   Serial.begin(115200);
+  
+  Joystick.begin();
+  Joystick.setAcceleratorRange(0,100);
+  Joystick.setAccelerator(0);
+   
   matrix.begin(8, 7, 10, 1); // dataPin, clkPin, csPin, numero de matrices de 8x8
   module.clearDisplay(); //clears the display from garbage if any
   matrix.borrar();
@@ -210,10 +254,19 @@ void setup() {
   }
   delay(750);                        //small fadeoff about 1.5 sec
 
-  while (!Serial) ; //esperamos la inicializacion del serie-usb en el leonardo, despues de mostrar los banner.
+  //FIXME: there must be a better way to do this and not hang the module if not serial is open. I event not sure this is the step hang.
+//  matrix.escribirCaracter('A',0);
+//  while (!Serial) ; //esperamos la inicializacion del serie-usb en el leonardo, despues de mostrar los banner.
+//  matrix.escribirCaracter('B',0);
   module.clearDisplay();              //clears the display from garbage if any  
 }
 
+void process_gear(){
+  if (geardata == true) {
+   matrix.escribirCaracter(gear=='0'?'N':gear,0);
+   geardata=false;                     
+  }
+}
 void processdata(){
  char s[9];
  unsigned int rpmleds;              //holds the 8 leds values
@@ -230,11 +283,7 @@ void processdata(){
    speeddata=false;                     
  }
  
- if (geardata == true) {
-   matrix.escribirCaracter(gear,0);
-   geardata=false;                     
- }
-
+ 
  if (rpmdata == true) {   
    if (rpm>rpmmax) rpm=rpmmax;
    if (rpm<rpmmin) rpm=rpmmin;
@@ -296,13 +345,133 @@ void serialEvent2(void){
   }
 }
 
-void loop() {
-  static int ck=0; 
-  while ((Serial) && (Serial.available()>=2) ) serialEvent2();
-  if (hay==true) {      
-   processdata();
-   hay = false; // reseteamos las estaticas.
+void do_palanca_cambios(){
+  int g,x,y,pos_act;
+
+
+  x=analogRead(PIN_GSX);             
+  y=analogRead(PIN_GSY);             
+
+  pos_act = 0;
+
+  if (digitalRead(PIN_GSR)) {
+    g=16;
+  } else {
+    g=0;
   }
+  if(x<CAL_X_MIN) {
+    g+=1;
+  } else if (x>CAL_X_MAX) {
+    g+=2;
+  }
+  if(y<CAL_Y_MIN) {
+    g+=8;
+  } else if (y>CAL_Y_MAX) {
+    g+=4;
+  }
+
+//  g= x<CAL_X_MIN?1:0 + x>CAL_X_MAX?2:0 + y<CAL_Y_MIN?8:0 + y>CAL_Y_MAX?4:0 + digitalRead(PIN_GSR)?16:0 ; 
+
+  switch (g){
+    case 5:
+      pos_act = 1;
+      break;
+    case 9:
+      pos_act = 2;
+      break;
+    case 4:
+      pos_act = 3;
+      break;
+    case 8:
+      pos_act = 4;
+      break;
+    case 6:
+      pos_act = 5;
+      break;
+    case 10:
+      pos_act = 6;
+      break;
+    case 26:
+      pos_act = 7;
+      break;
+   }
+   
+  if (pos_act != marcha ){
+      Joystick.setButton(0,pos_act==1?HIGH:LOW);
+      Joystick.setButton(1,pos_act==2?HIGH:LOW);
+      Joystick.setButton(2,pos_act==3?HIGH:LOW);
+      Joystick.setButton(3,pos_act==4?HIGH:LOW);
+      Joystick.setButton(4,pos_act==5?HIGH:LOW);
+      Joystick.setButton(5,pos_act==6?HIGH:LOW);
+      Joystick.setButton(6,pos_act==7?HIGH:LOW);
+      marcha = pos_act;
+  }
+
+  // This two are the truck extra gears switchs
+  Joystick.setButton(7, !digitalRead(PIN_GS1));
+  Joystick.setButton(8, !digitalRead(PIN_GS2));
+}
+
+void do_embrague(){
+   int _cluch; 
+  _cluch = digitalRead(PIN_E);
+  if (_cluch==0) {
+     Joystick.setAccelerator(100);
+     embrague=100;
+  } else { 
+    if (embrague >= 0) {
+      embrague=embrague-10;
+      Joystick.setAccelerator(embrague);      
+      delay(50); //must be a better way to do the delay on remove the clutch
+    }
+  }  
+}
+
+void loop() {
+  static int ck=0;
+  static long timeout=0;
+  static int esperando=0;
+  static int oldgear;
+  int marcha_tmp; 
+  do_palanca_cambios();
+  do_embrague();
+  
+  while ((Serial) && (Serial.available()>=2) ) serialEvent2();
+  
+  if (hay==true) {
+    if (idle){
+      idle=false;
+      if (!geardata) {
+        gear=oldgear;
+        geardata=true;                                 
+      }
+    }
+    processdata();
+    process_gear();
+    hay = false; // reseteamos las estaticas.
+    timeout=0;
+  } else {
+    if (!idle) timeout++;
+    if (timeout>=1000) { //fixme, disconected is about 1000 seconds, but conected is about it's almost 5 seconds there are some up locking the loop
+       idle = true;
+       oldgear=gear;
+       module.setDisplayToString("IdLE    ");    //prints the banner
+    }    
+  }
+  if (idle) {
+    if (marcha==7) {
+       marcha_tmp='R';
+    } else {
+      marcha_tmp=marcha+48;
+    }
+    if (gear != marcha_tmp){
+      gear=marcha_tmp;
+      geardata=true;
+      process_gear();
+    }
+  }
+
+  
   ck++;  // solo leemos las teclas una de cada 5 veces, es un proceso lento.
   if (ck>=5) {
      readkeys(); 
