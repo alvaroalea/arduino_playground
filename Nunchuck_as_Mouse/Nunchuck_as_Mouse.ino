@@ -1,3 +1,4 @@
+
 /*
 *  Project     Nunchuk as a mouse
 *  @author     Alvaro Alea Fernandez
@@ -13,11 +14,23 @@
 *  
 *  */
 
-#include <NintendoExtensionCtrl.h>
+// Enable this for use as bluetooth with a ESP32
+//#define USE_BLUETOOTH
+
+#ifdef USE_BLUETOOTH
+#include <BleConnectionStatus.h>
+#include <BleMouse.h>
+BleMouse Mouse;
+#else 
 #include "Mouse.h"
+#endif
+
+#include <NintendoExtensionCtrl.h>
 Nunchuk nchuk;
 
+
 //#define DEBUG
+//#define AUTOCAL_DEBUG
 #ifdef DEBUG
 #define DEBUGPRINT(par) Serial.print(par)
 #define DEBUGPRINTLN(par) Serial.println(par)
@@ -29,16 +42,16 @@ Nunchuk nchuk;
 // parameters for reading the joystick:
 #define RANGE  32
 #define CENTER 16
-#define STEP1  10
+#define STEP1  12
 
-#define threshold 3    
+#define threshold 2    
                
 #define responseDelay 10        
 #define CDELAY 200
 
 int ac1x=3,ac1y,ac2x=6,ac2y,ac3x,ac3y;
-int inx[]={32,65,122,164,192}; //22,122,222
-int iny[]={32,64,125,164,192}; //16,125,225
+int inx[]={64,96,127,159,192}; //22,122,222
+int iny[]={64,96,127,159,192}; //16,125,225
 
 /* FROM: https://playground.arduino.cc/Main/MultiMap/ */
 // note: the _in array should have increasing values
@@ -56,6 +69,7 @@ int multiMap(int val, int* _in, int* _out, uint8_t size)
 
 void autocal(int x, int *in, int *ac1,int *ac2){
 //this calibrate minumun and maximun values of in table,hold for about 2second in this position and new value is catch if over the previous.
+#ifdef AUTOCAL_DEBUG
 DEBUGPRINT("Autocal x=");
 DEBUGPRINT(x);
 
@@ -67,7 +81,7 @@ DEBUGPRINT("AC1=");
 DEBUGPRINT(*ac1);
 DEBUGPRINT(" AC2=");
 DEBUGPRINT(*ac2);
-
+#endif
   if (x>=in[0]){
     *ac1=0;
     DEBUGPRINT("+");
@@ -89,7 +103,7 @@ DEBUGPRINT(*ac2);
       in[3]= ((in[4]-in[2])/2)+in[2];
     }
   }
-DEBUGPRINTLN("");
+//DEBUGPRINTLN("");
 }
 
 int mouseCalc(int value,int * in) {
@@ -109,14 +123,13 @@ void setup() {
 #ifdef DEBUG
 	Serial.begin(115200);
 #endif
-
+  Mouse.begin();
 	nchuk.begin();
 
 	while (!nchuk.connect()) {
 		DEBUGPRINTLN("Nunchuk not detected!");
 		delay(1000);
 	}
-  Mouse.begin();
   DEBUGPRINTLN("----- Nunchuk Demo -----"); // Making things easier to read
   boolean success = nchuk.update();
   inx[2] = nchuk.joyX();
@@ -138,6 +151,10 @@ void loop() {
 		// Read a button (on/off, C and Z)
 		boolean zButton = nchuk.buttonZ();   
     boolean cButton = nchuk.buttonC();
+    if ((cButton == 0) and ( ccount>0)) {
+      Mouse.click(MOUSE_RIGHT);
+      ccount = 0;
+    }
     if (cButton!=bc) {
       if (cButton) {
         ccount++;
@@ -171,11 +188,11 @@ void loop() {
     int x = nchuk.joyX();
     autocal(x, inx, &ac1x,&ac2x);
     int xReading = mouseCalc(x,inx);
-    
+    DEBUGPRINT(" ");  
     int y = nchuk.joyY();
     autocal(y, iny, &ac1y,&ac2y);
     int yReading = mouseCalc(y,iny);
-    
+    DEBUGPRINTLN("");
     if ((xReading!=0) or (yReading!=0)) {
       Mouse.move(xReading, -yReading, 0);
       delay(responseDelay);
