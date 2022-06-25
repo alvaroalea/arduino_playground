@@ -1,4 +1,3 @@
-
 /*
 *  Project     Nunchuk as a mouse
 *  @author     Alvaro Alea Fernandez
@@ -22,17 +21,27 @@
 #include <BleConnectionStatus.h>
 #include <BleMouse.h>
 BleMouse Mouse;
-#define ONBOARD_LED  2
+//#define ONBOARD_LED  2
+#define ONBOARD_LED  3
+#define I2C_SDA 7
+#define I2C_SCL 8
 #else 
 #include "Mouse.h"
 #define ONBOARD_LED  13
 #endif
 
+//ESP32 C3
+#define ONBOARD_RLED 3
+#define ONBOARD_GLED 4
+#define ONBOARD_BLED 5
+#define LED_W_BUILTIN 19
+#define LED_O_BUILTIN 18
+#define ONBOARD_LED 18
 #include <NintendoExtensionCtrl.h>
 Nunchuk nchuk;
 
 
-//#define DEBUG
+#define DEBUG
 #ifdef DEBUG
 //#define AUTOCAL_DEBUG
 //#define DEBUGCOORD
@@ -133,7 +142,12 @@ int mouseCalc(int value,int * in) {
 //=====================================================================================
 
 void setup() {
-  pinMode(ONBOARD_LED,OUTPUT);
+  pinMode(LED_W_BUILTIN,OUTPUT);
+  pinMode(LED_O_BUILTIN,OUTPUT);
+  digitalWrite(LED_O_BUILTIN,HIGH);
+
+  Wire.begin(I2C_SDA, I2C_SCL);
+
 #ifdef DEBUG
 	Serial.begin(115200);
 #endif
@@ -144,7 +158,10 @@ void setup() {
 		DEBUGPRINTLN("Nunchuk not detected!");
 		delay(1000);
 	}
+  digitalWrite(LED_O_BUILTIN,LOW);
+  digitalWrite(LED_W_BUILTIN,HIGH);
   DEBUGPRINTLN("----- Nunchuk Demo -----"); // Making things easier to read
+//  digitalWrite(3,LOW);
   boolean success = nchuk.update();
   inx[2] = nchuk.joyX();
   iny[2] = nchuk.joyY();
@@ -208,6 +225,14 @@ void loop() {
     int y = nchuk.joyY();
     needcaly=autocal(y, iny, &ac1y,&ac2y,needcaly);
     int yReading = mouseCalc(y,iny);
+
+    // Read an accelerometer and print values (0-1023, X, Y, and Z)
+    int accelX = nchuk.accelX();
+    if (accelX<400){
+      yReading = -xReading;
+      xReading = 0;
+    }
+
     
     if ((xReading!=0) or (yReading!=0)) {
       Mouse.move(xReading, -yReading, 0);
