@@ -1,8 +1,8 @@
-/*
+ /*
 *  Project     Nunchuk as a mouse
 *  @author     Alvaro Alea Fernandez
-*  @link       github.com/alvaroalea/????
-*  @license    LGPLv3 - Copyright (c) 2018 David Madison
+*  @link       https://github.com/alvaroalea/arduino_playground/tree/master/Nunchuck_as_Mouse
+*  @license    LGPLv3 - Copyright (c) 2022 Alvaro Alea
 *
 *  This file create a USB HID or bluetooth mouse that is managed by joy and keys on nintendo's nunchuk
 *  is to help people with reduced movement to use a android mobile
@@ -10,7 +10,6 @@
 *  Z button is "touch" in screen, or left click.
 *  C button (hold for about 2 second) is "back" or right click 
 *  C and before 2 seconds press Z is "home" o click in the middle button (wheel)
-*  
 *  */
 
 // Enable this for use as bluetooth with a ESP32
@@ -22,29 +21,35 @@
 #include <BleMouse.h>
 BleMouse Mouse;
 //#define ONBOARD_LED  2
+//#define I2C_SDA 7
+//#define I2C_SCL 8
 #define ONBOARD_LED  3
-#define I2C_SDA 7
-#define I2C_SCL 8
+#define I2C_SDA 27
+#define I2C_SCL 26
+
 #else 
 #include "Mouse.h"
 #define ONBOARD_LED  13
 #endif
 
 //ESP32 C3
+#define ONBOARD_LED 18
 #define ONBOARD_RLED 3
 #define ONBOARD_GLED 4
 #define ONBOARD_BLED 5
 #define LED_W_BUILTIN 19
 #define LED_O_BUILTIN 18
-#define ONBOARD_LED 18
+//#define HAVE_DUAL_LED
+
+
 #include <NintendoExtensionCtrl.h>
 Nunchuk nchuk;
 
 
-#define DEBUG
+//#define DEBUG
 #ifdef DEBUG
 //#define AUTOCAL_DEBUG
-//#define DEBUGCOORD
+#define DEBUGCOORD
 #define DEBUGPRINT(par) Serial.print(par)
 #define DEBUGPRINTLN(par) Serial.println(par)
 #else
@@ -59,14 +64,19 @@ Nunchuk nchuk;
 #define ZSTEP1 5
 #define threshold 2    
                
-#define responseDelay 15        
+//#define responseDelay 15        
+#define tstep 4
 #define CDELAY 200
 #define LEDPERIOD 20
+#define SWAPGRAD 600
 
 int ac1x=3,ac1y,ac2x=6,ac2y,ac3x,ac3y;
-int inx[]={64,96,127,159,192}; //22,122,222
-int iny[]={64,96,127,159,192}; //16,125,225
-int out[] = { 0,STEP1 ,CENTER , (RANGE-STEP1) ,RANGE };
+int inx[]={1,32,131,223,254}; //22,122,222
+int iny[]={0,32,128,223,255}; //16,125,225
+int out[] = { -threshold,STEP1 ,CENTER , (RANGE-STEP1) ,RANGE+threshold };
+int tin[]= {1,  8,16,32};
+int tout[]={25,20,15,10};
+
 bool needcalx=0,needcaly=0;
 int calibrated=0;
 
@@ -131,22 +141,45 @@ return needcal;
 
 int mouseCalc(int value,int * in) {
 //calculate offser of mouse movement, based on read value and input table
-  int reading = multiMap(value, in, out, 5);
+#ifdef DEBUGCOORD    
+DEBUGPRINTLN("");
+DEBUGPRINT("va=");
+DEBUGPRINT(value);
+#endif  
+int reading = multiMap(value, in, out, ZSTEP1);
+#ifdef DEBUGCOORD    
+DEBUGPRINT(" re=");
+DEBUGPRINT(reading);
+#endif
   int distance = reading - CENTER;
-  if (abs(distance) < threshold) {
+#ifdef DEBUGCOORD    
+DEBUGPRINT(" di=");
+DEBUGPRINT(distance);
+#endif
+  if (abs(distance) <= threshold) {
     distance = 0;
+  } else if (distance <0) {
+    distance = distance + threshold;
+  } else {
+    distance = distance - threshold;
   }
+#ifdef DEBUGCOORD    
+DEBUGPRINT(" di2=");
+DEBUGPRINT(distance);
+#endif
   return distance;   // return the distance for this axis
 }
 
 //=====================================================================================
 
 void setup() {
+#ifdef  HAVE_DUAL_LED
   pinMode(LED_W_BUILTIN,OUTPUT);
   pinMode(LED_O_BUILTIN,OUTPUT);
   digitalWrite(LED_O_BUILTIN,HIGH);
+#endif
 
-  Wire.begin(I2C_SDA, I2C_SCL);
+  Wire.begin(I2C_SDA, I2C_SCL); //esto fuerza el uso de patillas no-standar
 
 #ifdef DEBUG
 	Serial.begin(115200);
@@ -158,8 +191,10 @@ void setup() {
 		DEBUGPRINTLN("Nunchuk not detected!");
 		delay(1000);
 	}
+#ifdef  HAVE_DUAL_LED
   digitalWrite(LED_O_BUILTIN,LOW);
   digitalWrite(LED_W_BUILTIN,HIGH);
+#endif
   DEBUGPRINTLN("----- Nunchuk Demo -----"); // Making things easier to read
 //  digitalWrite(3,LOW);
   boolean success = nchuk.update();
@@ -228,21 +263,27 @@ void loop() {
 
     // Read an accelerometer and print values (0-1023, X, Y, and Z)
     int accelX = nchuk.accelX();
-    if (accelX<400){
+    if (accelX<SWAPGRAD){
       yReading = -xReading;
       xReading = 0;
     }
 
-    
+    int maxt = abs(xReading)>abs(yReading)?abs(xReading):abs(yReading);
+   
     if ((xReading!=0) or (yReading!=0)) {
       Mouse.move(xReading, -yReading, 0);
-      delay(responseDelay);
+      delay(multiMap(maxt,tin,tout,tstep));
     }
 #ifdef DEBUGCOORD    
+DEBUGPRINTLN("");
 DEBUGPRINT("X=");
 DEBUGPRINT(xReading);
 DEBUGPRINT(" Y=");
-DEBUGPRINTLN(yReading);
+DEBUGPRINT(yReading);
+DEBUGPRINT(" d=");
+DEBUGPRINT(maxt);
+DEBUGPRINT("->");
+DEBUGPRINTLN(multiMap(maxt,tin,tout,tstep));
 #endif
 		// Print all the values!
 		//nchuk.printDebug();
@@ -262,4 +303,7 @@ DEBUGPRINTLN(yReading);
       digitalWrite(ONBOARD_LED,LOW);
       }
   }
+  #ifdef DEBUG
+      nchuk.printDebug(); 
+  #endif
 }
