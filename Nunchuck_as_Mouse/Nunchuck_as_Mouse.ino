@@ -197,11 +197,40 @@ void setup() {
 #endif
   DEBUGPRINTLN("----- Nunchuk Demo -----"); // Making things easier to read
 //  digitalWrite(3,LOW);
-  boolean success = nchuk.update();
-  inx[2] = nchuk.joyX();
-  iny[2] = nchuk.joyY();
 }
+bool waitnunck(void){
+  static bool status = 0;
+  bool success = nchuk.update();  // Get new data from the controller
 
+  if (status ==1) { // estabamos conectados
+	  if (!success) {  // Ruh roh
+		  DEBUGPRINTLN("Controller disconnected!");
+		  delay(1000);
+      status =0;
+    }
+  } else { // no estabamos conectados
+    if (!success) {  // y seguimos desconectados
+		  DEBUGPRINT(".");
+		  delay(1000);
+    } else { // encontrado!
+      int x[3]={1,2,3};
+      int y[3]={1,2,3};
+      int c=0;
+      do { // necesitamos 3 lecturas iguales para calibrar el 0.
+        nchuk.update();
+        x[c] = nchuk.joyX();
+        y[c] = nchuk.joyY();
+        delay(100);
+        c++;
+        c=c>2?0:c;
+      } while ((x[0]!=x[1]) || (x[0]!=x[2]) || (y[0]!=y[1]) || (y[0]!=y[2]));
+      inx[2] = x[0];
+      iny[2] = y[0];
+      status =1;       
+    }
+  }
+  return status;
+}
 
 void loop() {
   static bool bc=0;
@@ -210,12 +239,13 @@ void loop() {
   static int blink=0;
   int t;
 	
-	boolean success = nchuk.update();  // Get new data from the controller
+/*	boolean success = nchuk.update();  // Get new data from the controller
 	if (!success) {  // Ruh roh
 		DEBUGPRINTLN("Controller disconnected!");
 		delay(1000);
-	}
-	else {
+	} else { 
+*/
+if (waitnunck()) {
 		// Read a button (on/off, C and Z)
 		boolean zButton = nchuk.buttonZ();   
     boolean cButton = nchuk.buttonC();
